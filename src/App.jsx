@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'react'
 import { BrowserMultiFormatReader } from '@zxing/browser'
 import './App.css'
 
+const API_URL = 'http://127.0.0.1:8000'
+
 function App() {
   const videoRef = useRef(null)
   const controlsRef = useRef(null)
@@ -11,25 +13,40 @@ function App() {
   const [product, setProduct] = useState(null)
   const [products, setProducts] = useState([])
   const [loading, setLoading] = useState(false)
+  const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+
   useEffect(() => {
-  fetch('http://127.0.0.1:8000/products')
-    .then((response) => response.json())
-    .then((data) => {
+    loadProducts()
+
+    return () => {
+      if (controlsRef.current) {
+        controlsRef.current.stop()
+        controlsRef.current = null
+      }
+    }
+  }, [])
+
+  async function loadProducts() {
+    try {
+      const response = await fetch(`${API_URL}/products`)
+
+      if (!response.ok) {
+        throw new Error('Could not load products')
+      }
+
+      const data = await response.json()
       setProducts(data)
-    })
-    .catch((err) => {
-      console.error('Could not load products:', err)
-    })
-}, [])
+      setError('')
+    } catch (err) {
+      console.error('Database loading error:', err)
+      setError(
+        'Could not connect to the HomeFood database.'
+      )
+    }
+  }
 
-  // Load saved products when HomeFood starts
- 
-
-  // Save products whenever the list changes
- 
-
-  const stopScanner = () => {
+  function stopScanner() {
     if (controlsRef.current) {
       controlsRef.current.stop()
       controlsRef.current = null
@@ -42,41 +59,7 @@ function App() {
     setScanning(false)
   }
 
-  const findProduct = async (code) => {
-    setLoading(true)
-    setError('')
-    setProduct(null)
-
-    try {
-      const url =
-        'https://world.openfoodfacts.org/api/v2/product/' +
-        code +
-        '?fields=product_name,brands,quantity,image_front_url,categories'
-
-      const response = await fetch(url)
-      const data = await response.json()
-
-      if (data.status === 1 && data.product) {
-        setProduct({
-          ...data.product,
-          barcode: code,
-        })
-      } else {
-        setError(
-          'Product was not found in Open Food Facts.',
-        )
-      }
-    } catch (err) {
-      console.error('Open Food Facts error:', err)
-      setError(
-        'Could not connect to Open Food Facts.',
-      )
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  const startScanner = async () => {
+  async function startScanner() {
     setBarcode('')
     setProduct(null)
     setError('')
@@ -91,6 +74,8 @@ function App() {
         (result) => {
           if (result) {
             const code = result.getText()
+
+            console.log('Barcode detected:', code)
 
             setBarcode(code)
 
@@ -107,7 +92,7 @@ function App() {
 
             findProduct(code)
           }
-        },
+        }
       )
 
       controlsRef.current = controls
@@ -118,8 +103,53 @@ function App() {
     }
   }
 
-  const addProduct = async () => {
-    if (!product) return
+  async function findProduct(code) {
+    setLoading(true)
+    setError('')
+    setProduct(null)
+
+    try {
+      const url =
+        'https://world.openfoodfacts.org/api/v2/product/' +
+        code +
+        '?fields=product_name,brands,quantity,image_front_url,categories'
+
+      const response = await fetch(url)
+
+      if (!response.ok) {
+        throw new Error('Open Food Facts request failed')
+      }
+
+      const data = await response.json()
+
+      if (data.status === 1 && data.product) {
+        setProduct({
+          ...data.product,
+          barcode: code,
+        })
+      } else {
+        setError(
+          'Product was not found in Open Food Facts.'
+        )
+      }
+    } catch (err) {
+      console.error('Open Food Facts error:', err)
+
+      setError(
+        'Could not connect to Open Food Facts.'
+      )
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function addProduct() {
+    if (!product || saving) {
+      return
+    }
+
+    setSaving(true)
+    setError('')
 
     const newProduct = {
       barcode: product.barcode,
@@ -131,8 +161,13 @@ function App() {
     }
 
     try {
+      console.log(
+        'Sending product to database:',
+        newProduct
+      )
+
       const response = await fetch(
-        'http://127.0.0.1:8000/products',
+        `${API_URL}/products`,
         {
           method: 'POST',
           headers: {
@@ -144,46 +179,72 @@ function App() {
 
       const data = await response.json()
 
+      console.log(
+        'Database response:',
+        data
+      )
+
+      if (!response.ok) {
+        throw new Error(
+          data.detail || 'Database returned an error.'
+        )
+      }
+
       if (!data.success) {
         setError(
-          data.message || 'Could not add product.'
+          data.message ||
+            'Product could not be added.'
         )
         return
       }
 
-      setProducts((currentProducts) => [
-        ...currentProducts,
-        {
-          ...newProduct,
-          id: data.id,
-        },
-      ])
+      await loadProducts()
 
       setProduct(null)
       setBarcode('')
     } catch (err) {
-      console.error('Could not save product:', err)
+      console.error(
+        'Could not save product:',
+        err
+      )
+
       setError(
-        'Could not connect to the HomeFood database.'
+        `Could not save product: ${err.message}`
+      )
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function removeProduct(id) {
+    try {
+      const response = await fetch(
+        `${API_URL}/products/${id}`,
+        {
+          method: 'DELETE',
+        }
+      )
+
+      const data = await response.json()
+
+      if (!response.ok || !data.success) {
+        throw new Error(
+          data.message || 'Could not delete product.'
+        )
+      }
+
+      await loadProducts()
+    } catch (err) {
+      console.error(
+        'Could not delete product:',
+        err
+      )
+
+      setError(
+        `Could not delete product: ${err.message}`
       )
     }
   }
-
-  const removeProduct = (id) => {
-
-  const removeProduct = (id) => {
-    setProducts((currentProducts) =>
-      currentProducts.filter((item) => item.id !== id),
-    )
-  }
-
-  useEffect(() => {
-    return () => {
-      if (controlsRef.current) {
-        controlsRef.current.stop()
-      }
-    }
-  }, [])
 
   return (
     <div className="app">
@@ -192,141 +253,151 @@ function App() {
         <p>What's in my house?</p>
       </header>
 
-      <main>
-        <button
-          className="scan-button"
-          onClick={startScanner}
-          disabled={scanning}
-        >
-          📷 Scan Product
-        </button>
+      <main className="main">
+        <section className="scanner-section">
+          <h2>Scan a product</h2>
 
-        <div
-          className="scanner"
-          style={{
-            display: scanning ? 'block' : 'none',
-          }}
-        >
-          <div className="camera-container">
+          <div className="scanner">
             <video
               ref={videoRef}
-              className="camera"
+              className="video"
               autoPlay
               muted
               playsInline
             />
-
-            <div className="scan-frame"></div>
           </div>
 
-          <button
-            className="stop-button"
-            onClick={stopScanner}
-          >
-            ✕ Stop Scanner
-          </button>
-        </div>
-
-        {!scanning && !barcode && !product && (
-          <p className="scan-text">
-            Use your webcam to scan a grocery barcode
-          </p>
-        )}
-
-        {barcode && (
-          <div className="result">
-            <h2>Barcode detected! ✅</h2>
-            <p>{barcode}</p>
+          <div className="buttons">
+            {!scanning ? (
+              <button
+                onClick={startScanner}
+                className="primary-button"
+              >
+                📷 Start Scanner
+              </button>
+            ) : (
+              <button
+                onClick={stopScanner}
+                className="secondary-button"
+              >
+                ⏹ Stop Scanner
+              </button>
+            )}
           </div>
-        )}
 
-        {loading && (
-          <div className="result">
-            <h2>🔎 Looking up product...</h2>
-            <p>Please wait.</p>
-          </div>
-        )}
+          {scanning && (
+            <p className="status">
+              Point the camera at a barcode...
+            </p>
+          )}
+
+          {barcode && (
+            <p className="barcode">
+              Barcode: <strong>{barcode}</strong>
+            </p>
+          )}
+
+          {loading && (
+            <p className="status">
+              🔎 Looking up product...
+            </p>
+          )}
+
+          {error && (
+            <div className="error">
+              {error}
+            </div>
+          )}
+        </section>
 
         {product && (
-          <div className="product">
-            {product.image_front_url && (
-              <img
-                src={product.image_front_url}
-                alt={product.product_name || 'Product'}
-                className="product-image"
-              />
-            )}
+          <section className="product-section">
+            <h2>Product found</h2>
 
-            <div className="product-info">
-              <h2>
-                {product.product_name ||
-                  'Unknown product'}
-              </h2>
-
-              {product.brands && (
-                <p>
-                  <strong>Brand:</strong>{' '}
-                  {product.brands}
-                </p>
+            <div className="product-card">
+              {product.image_front_url && (
+                <img
+                  src={product.image_front_url}
+                  alt={product.product_name || 'Product'}
+                  className="product-image"
+                />
               )}
 
-              {product.quantity && (
-                <p>
-                  <strong>Quantity:</strong>{' '}
-                  {product.quantity}
-                </p>
-              )}
+              <div className="product-info">
+                <h3>
+                  {product.product_name ||
+                    'Unknown product'}
+                </h3>
 
-              <button
-                className="add-button"
-                onClick={addProduct}
-              >
-                ➕ Add to My Ingredients
-              </button>
+                {product.brands && (
+                  <p>
+                    <strong>Brand:</strong>{' '}
+                    {product.brands}
+                  </p>
+                )}
+
+                {product.quantity && (
+                  <p>
+                    <strong>Quantity:</strong>{' '}
+                    {product.quantity}
+                  </p>
+                )}
+
+                {product.categories && (
+                  <p>
+                    <strong>Category:</strong>{' '}
+                    {product.categories}
+                  </p>
+                )}
+
+                <p>
+                  <strong>Barcode:</strong>{' '}
+                  {product.barcode}
+                </p>
+
+                <button
+                  onClick={addProduct}
+                  disabled={saving}
+                  className="primary-button"
+                >
+                  {saving
+                    ? '💾 Saving...'
+                    : '➕ Add to My Ingredients'}
+                </button>
+              </div>
             </div>
-          </div>
+          </section>
         )}
 
-        {error && (
-          <div className="error">
-            {error}
-          </div>
-        )}
-
-        <section className="ingredients">
+        <section className="ingredients-section">
           <h2>
-            My Ingredients ({products.length})
+            🧺 My Ingredients ({products.length})
           </h2>
 
           {products.length === 0 ? (
-            <div className="empty">
-              <div className="empty-icon">🛒</div>
-              <p>No products yet</p>
-              <span>
-                Scan a product to add it to your home
-                inventory.
-              </span>
-            </div>
+            <p className="empty">
+              No ingredients added yet.
+            </p>
           ) : (
-            <div className="product-list">
+            <div className="products-list">
               {products.map((item) => (
                 <div
-                  className="inventory-item"
+                  className="ingredient-card"
                   key={item.id}
                 >
                   {item.image ? (
                     <img
                       src={item.image}
                       alt={item.name}
-                      className="inventory-image"
+                      className="ingredient-image"
                     />
                   ) : (
-                    <div className="inventory-placeholder">
-                      🛒
+                    <div className="ingredient-placeholder">
+                      🥫
                     </div>
                   )}
 
-                  <div className="inventory-info">
+                  <div className="ingredient-info">
                     <h3>{item.name}</h3>
 
                     {item.brand && (
@@ -334,17 +405,21 @@ function App() {
                     )}
 
                     {item.quantity && (
-                      <span>{item.quantity}</span>
+                      <p>{item.quantity}</p>
                     )}
+
+                    <small>
+                      Barcode: {item.barcode}
+                    </small>
                   </div>
 
                   <button
-                    className="remove-button"
                     onClick={() =>
                       removeProduct(item.id)
                     }
+                    className="delete-button"
                   >
-                    ✕
+                    🗑️
                   </button>
                 </div>
               ))}
@@ -355,5 +430,5 @@ function App() {
     </div>
   )
 }
-}
-export default App 
+
+export default App

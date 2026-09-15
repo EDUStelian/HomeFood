@@ -123,3 +123,28 @@ def add_product(product: Product):
 
     finally:
         connection.close()
+@app.delete("/products/{product_id}")
+def delete_product(product_id: int):
+    connection = get_connection()
+    cursor = connection.cursor()
+
+    cursor.execute(
+        "DELETE FROM products WHERE id = ?",
+        (product_id,)
+    )
+
+    connection.commit()
+
+    deleted = cursor.rowcount
+
+    connection.close()
+
+    if deleted == 0:
+        return {
+            "success": False,
+            "message": "Product not found."
+        }
+
+    return {
+        "success": True
+    }
