@@ -1,3 +1,4 @@
+```jsx
 import { useEffect, useRef, useState } from 'react'
 import { BrowserMultiFormatReader } from '@zxing/browser'
 import './App.css'
@@ -12,23 +13,27 @@ function App() {
   const [products, setProducts] = useState([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+
+  // Load products from SQLite when the app starts
   useEffect(() => {
-  fetch('http://127.0.0.1:8000/products')
-    .then((response) => response.json())
-    .then((data) => {
-      setProducts(data)
-    })
-    .catch((err) => {
-      console.error('Could not load products:', err)
-    })
-}, [])
+    fetch('http://127.0.0.1:8000/products')
+      .then((response) => {
+        if (!response.ok) {
+          throw new Error('Could not load products')
+        }
 
-  // Load saved products when HomeFood starts
- 
+        return response.json()
+      })
+      .then((data) => {
+        setProducts(data)
+      })
+      .catch((err) => {
+        console.error('Could not load products:', err)
+        setError('Could not connect to the HomeFood database.')
+      })
+  }, [])
 
-  // Save products whenever the list changes
- 
-
+  // Stop the camera
   const stopScanner = () => {
     if (controlsRef.current) {
       controlsRef.current.stop()
@@ -42,6 +47,7 @@ function App() {
     setScanning(false)
   }
 
+  // Look up a barcode in Open Food Facts
   const findProduct = async (code) => {
     setLoading(true)
     setError('')
@@ -68,6 +74,7 @@ function App() {
       }
     } catch (err) {
       console.error('Open Food Facts error:', err)
+
       setError(
         'Could not connect to Open Food Facts.',
       )
@@ -76,6 +83,7 @@ function App() {
     }
   }
 
+  // Start barcode scanner
   const startScanner = async () => {
     setBarcode('')
     setProduct(null)
@@ -113,11 +121,13 @@ function App() {
       controlsRef.current = controls
     } catch (err) {
       console.error('Scanner error:', err)
+
       setError('Could not access the camera.')
       setScanning(false)
     }
   }
 
+  // Add the Open Food Facts product to SQLite
   const addProduct = async () => {
     if (!product) return
 
@@ -139,14 +149,14 @@ function App() {
             'Content-Type': 'application/json',
           },
           body: JSON.stringify(newProduct),
-        }
+        },
       )
 
       const data = await response.json()
 
       if (!data.success) {
         setError(
-          data.message || 'Could not add product.'
+          data.message || 'Could not add product.',
         )
         return
       }
@@ -161,22 +171,24 @@ function App() {
 
       setProduct(null)
       setBarcode('')
+      setError('')
     } catch (err) {
       console.error('Could not save product:', err)
+
       setError(
-        'Could not connect to the HomeFood database.'
+        'Could not connect to the HomeFood database.',
       )
     }
   }
 
-  const removeProduct = (id) => {
-
+  // Remove product from the current screen
   const removeProduct = (id) => {
     setProducts((currentProducts) =>
       currentProducts.filter((item) => item.id !== id),
     )
   }
 
+  // Stop scanner when leaving the page
   useEffect(() => {
     return () => {
       if (controlsRef.current) {
@@ -252,7 +264,9 @@ function App() {
             {product.image_front_url && (
               <img
                 src={product.image_front_url}
-                alt={product.product_name || 'Product'}
+                alt={
+                  product.product_name || 'Product'
+                }
                 className="product-image"
               />
             )}
@@ -301,10 +315,12 @@ function App() {
           {products.length === 0 ? (
             <div className="empty">
               <div className="empty-icon">🛒</div>
+
               <p>No products yet</p>
+
               <span>
-                Scan a product to add it to your home
-                inventory.
+                Scan a product to add it to your
+                home inventory.
               </span>
             </div>
           ) : (
@@ -355,5 +371,6 @@ function App() {
     </div>
   )
 }
-}
-export default App 
+
+export default App
+```
