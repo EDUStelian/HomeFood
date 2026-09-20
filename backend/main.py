@@ -1,4 +1,9 @@
+import os
+import sys
+
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import sqlite3
@@ -41,6 +46,27 @@ def create_table():
 
 
 create_table()
+if getattr(sys, "frozen", False):
+    BASE_DIR = sys._MEIPASS
+    FRONTEND_DIR = os.path.join(BASE_DIR, "dist")
+else:
+    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+    FRONTEND_DIR = os.path.join(BASE_DIR, "..", "dist")
+
+ASSETS_DIR = os.path.join(FRONTEND_DIR, "assets")
+
+app.mount(
+    "/assets",
+    StaticFiles(directory=ASSETS_DIR),
+    name="assets"
+)
+
+
+@app.get("/app")
+def serve_app():
+    return FileResponse(
+        os.path.join(FRONTEND_DIR, "index.html")
+    )   
 
 
 class Product(BaseModel):
@@ -123,6 +149,7 @@ def add_product(product: Product):
 
     finally:
         connection.close()
+
 @app.delete("/products/{product_id}")
 def delete_product(product_id: int):
     connection = get_connection()
@@ -148,3 +175,39 @@ def delete_product(product_id: int):
     return {
         "success": True
     }
+
+if __name__ == "__main__":
+    import threading
+    import time
+    import webview
+    import uvicorn
+
+    def start_server():
+        uvicorn.run(
+            app,
+            host="127.0.0.1",
+            port=8000,
+            log_config=None
+        )
+
+    server_thread = threading.Thread(
+        target=start_server,
+        daemon=True
+    )
+
+    server_thread.start()
+
+    time.sleep(2)
+
+    window = webview.create_window(
+        "HomeFood",
+        "http://127.0.0.1:8000/app",
+        width=1200,
+        height=800,
+        min_size=(900, 600)
+    )
+
+    webview.start()
+
+    # Closing the HomeFood window reaches this point.
+    # The application then exits and the server thread stops.
